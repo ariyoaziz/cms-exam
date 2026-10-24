@@ -1,0 +1,6 @@
+import type { Draft } from "../../types/cms";
+export type DraftBuffer = { baseline: Draft; values: Draft; dirtyFields: string[] };
+export function cloneDraft<T>(value: T): T { return structuredClone(value); }
+export function dirtyFields<T>(baseline: T, values: T): string[] { const result: string[] = []; const visit = (left: unknown, right: unknown, path: string) => { if (Object.is(left, right)) return; if (Array.isArray(left) && Array.isArray(right)) { const length = Math.max(left.length, right.length); for (let index = 0; index < length; index += 1) visit(left[index], right[index], `${path}[${index}]`); return; } if (left && right && typeof left === "object" && typeof right === "object") { const keys = new Set([...Object.keys(left), ...Object.keys(right)]); for (const key of keys) visit((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key], path ? `${path}.${key}` : key); return; } result.push(path || "content"); }; visit(baseline, values, ""); return result; }
+export function createDraftBuffer(draft: Draft): DraftBuffer { const baseline = cloneDraft(draft); return { baseline, values: cloneDraft(draft), dirtyFields: [] }; }
+export function markDraftSaved(values: Draft): DraftBuffer { return createDraftBuffer(values); }

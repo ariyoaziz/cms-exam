@@ -1,0 +1,2 @@
+export interface PersistenceAdapter<T> { read(): T | null; write(value: T): boolean; remove(): void; }
+export function browserStorage(key: string): PersistenceAdapter<string> { return { read: () => { try { return typeof window === "undefined" ? null : window.localStorage.getItem(key); } catch { return null; } }, write: (value) => { try { window.localStorage.setItem(key, value); return true; } catch { return false; } }, remove: () => { try { window.localStorage.removeItem(key); } catch { /* storage may be unavailable */ } } }; }

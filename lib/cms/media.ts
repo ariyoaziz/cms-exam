@@ -1,0 +1,10 @@
+import sharp from "sharp";
+import { randomUUID } from "node:crypto";
+import type { MediaAsset } from "../../types/cms";
+export const supportedImageTypes = ["image/jpeg", "image/png", "image/webp"] as const;
+export const maxImageBytes = 5 * 1024 * 1024;
+export const maxImageDimension = 6000;
+export const maxImagePixels = 36_000_000;
+export type ProcessedImage = { buffer: Buffer; asset: MediaAsset };
+export function validateImageUpload(file: { type: string; size: number }): string | null { if (!supportedImageTypes.includes(file.type as (typeof supportedImageTypes)[number])) return "Format gambar harus JPG, PNG, atau WebP."; if (file.size <= 0) return "File gambar kosong."; if (file.size > maxImageBytes) return "Ukuran gambar maksimal 5 MB."; return null; }
+export async function processImageUpload(input: Buffer, originalFilename: string, websiteId: string): Promise<ProcessedImage> { if (!input.length) throw new Error("EMPTY_IMAGE"); const metadata = await sharp(input, { limitInputPixels: maxImagePixels }).metadata(); if (!metadata.format || !["jpeg", "png", "webp"].includes(metadata.format)) throw new Error("UNSUPPORTED_IMAGE"); if (!metadata.width || !metadata.height || metadata.width > maxImageDimension || metadata.height > maxImageDimension || metadata.width * metadata.height > maxImagePixels) throw new Error("IMAGE_DIMENSIONS_TOO_LARGE"); const id = randomUUID(); const filename = `${id}.webp`; const buffer = await sharp(input, { limitInputPixels: maxImagePixels }).rotate().resize({ width: 2400, height: 1600, fit: "inside", withoutEnlargement: true }).webp({ quality: 84 }).toBuffer(); const processedMetadata = await sharp(buffer).metadata(); const now = new Date().toISOString(); return { buffer, asset: { id: `${websiteId}:${id}`, websiteId, filename, originalFilename: originalFilename.slice(0, 180), url: `/uploads/media/${websiteId}/${filename}`, mimeType: "image/webp", width: processedMetadata.width ?? metadata.width, height: processedMetadata.height ?? metadata.height, sizeBytes: buffer.length, altText: "", createdAt: now, status: "ready" } }; }

@@ -1,0 +1,8 @@
+import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import path from "node:path";
+import type { MediaAsset } from "../../types/cms";
+export interface AssetStorage { store(buffer: Buffer, asset: MediaAsset): Promise<MediaAsset>; list(websiteId: string): Promise<MediaAsset[]>; remove(asset: MediaAsset): Promise<void>; }
+const uploadRoot = path.join(process.cwd(), "public", "uploads", "media");
+const safeWebsiteId = (websiteId: string) => websiteId.replace(/[^a-z0-9-]/gi, "");
+const websiteRoot = (websiteId: string) => path.join(uploadRoot, safeWebsiteId(websiteId));
+export const localDevelopmentAssetStorage: AssetStorage = { async store(buffer, asset) { const root = websiteRoot(asset.websiteId); await mkdir(root, { recursive: true }); await writeFile(path.join(root, asset.filename), buffer, { flag: "wx" }); return asset; }, async list(websiteId) { const root = websiteRoot(websiteId); await mkdir(root, { recursive: true }); const files = await readdir(root); const assets: MediaAsset[] = []; for (const filename of files.filter((file) => file.endsWith(".webp"))) { const filePath = path.join(root, filename); const buffer = await readFile(filePath); assets.push({ id: `${websiteId}:${filename.replace(/\.webp$/, "")}`, websiteId, filename, originalFilename: filename, url: `/uploads/media/${safeWebsiteId(websiteId)}/${filename}`, mimeType: "image/webp", width: 0, height: 0, sizeBytes: buffer.length, altText: "", createdAt: new Date().toISOString(), status: "ready" }); } return assets; }, async remove(asset) { await unlink(path.join(websiteRoot(asset.websiteId), asset.filename)); } };
