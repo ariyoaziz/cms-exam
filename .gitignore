@@ -15,6 +15,10 @@
 
 # next.js
 /.next/
+/.open-next/
+/.wrangler/
+/.dev.vars*
+!.dev.vars.example
 /out/
 
 # production
@@ -23,6 +27,7 @@
 # misc
 .DS_Store
 *.pem
+page.tsx.corrupt-backup-*
 
 # debug
 npm-debug.log*

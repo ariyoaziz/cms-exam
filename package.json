@@ -5,12 +5,17 @@
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build --webpack",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@opennextjs/cloudflare": "^1.20.13",
     "@react-spectrum/s2": "^1.8.2",
     "lucide-react": "^1.61.0",
     "next": "16.4.3",
@@ -29,6 +34,7 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "unplugin-parcel-macros": "^0.2.0",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "wrangler": "^4.152.0"
   }
 }
