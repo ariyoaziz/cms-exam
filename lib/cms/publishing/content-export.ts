@@ -21,7 +21,7 @@ const pageSchema = z.object({ id: z.string().min(1), name: z.string(), slug: z.s
 const productSchema = z.object({ id: z.string().min(1), name: z.string(), description: z.string(), price: z.string(), image: z.string(), imageAlt: z.string() });
 const articleSchema = z.object({ id: z.string().min(1), title: z.string(), excerpt: z.string(), content: z.string(), coverImage: z.string(), status: z.enum(["draft", "published"]), publishedAt: z.string().optional() });
 const sectionSchema = z.object({ id: z.string().min(1), type: z.enum(["hero", "menu", "about", "gallery", "testimonial", "articles", "cta", "basic"]), label: z.string(), visible: z.boolean(), content: z.object({ eyebrow: z.string(), title: z.string(), description: z.string(), primaryLabel: z.string(), secondaryLabel: z.string(), image: z.string().url(), imageAlt: z.string(), linkType: z.enum(["section", "url", "whatsapp"]), linkTarget: z.string() }) });
-const contentExportSchema = z.object({ schemaVersion: z.literal(1), website: z.object({ websiteId: z.string(), slug: z.string(), name: z.string(), domain: z.string() }), pages: z.array(pageSchema), sections: z.array(sectionSchema), products: z.array(productSchema), articles: z.array(articleSchema) });
+const contentExportSchema = z.object({ schemaVersion: z.literal(1), website: z.object({ websiteId: z.string(), slug: z.string(), name: z.string(), domain: z.string() }), pages: z.array(pageSchema).min(1), sections: z.array(sectionSchema).min(1), products: z.array(productSchema), articles: z.array(articleSchema) });
 
 const isStableImageUrl = (value: string) => /^https:\/\//i.test(value) && !/[\r\n]/.test(value);
 

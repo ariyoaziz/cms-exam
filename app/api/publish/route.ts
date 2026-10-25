@@ -11,7 +11,10 @@ export async function POST(request: Request) {
     if (!body.draft || typeof body.draft !== "object") return NextResponse.json({ ok: false, error: "Draft wajib dikirim." }, { status: 400 });
     const draft = body.draft as Draft;
     exportWebsiteContent(draft);
-    return NextResponse.json(await publishToGitHub(draft));
+    const result = await publishToGitHub(draft);
+    const { httpStatus, ...publicResult } = result;
+    const status = result.ok ? 200 : httpStatus === 409 ? 409 : httpStatus === 422 ? 422 : httpStatus === 429 ? 503 : 502;
+    return NextResponse.json(publicResult, { status });
   } catch (error) {
     if (error instanceof GitHubConfigurationError) {
       console.error("cms-github-configuration-failure", JSON.stringify({ category: error.category, missingVariables: error.missingVariables }));

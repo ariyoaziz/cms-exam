@@ -20,9 +20,11 @@ Salin [.env.example](../.env.example) ke environment server dan isi dengan fine-
 
 Untuk Cloudflare Workers, set kelima variabel sebagai runtime variables/secrets pada Worker (`GITHUB_TOKEN` sebagai Secret). Jangan hanya mengaturnya sebagai Workers Builds build variables. Worker memakai `process.env`; konfigurasi Wrangler mengaktifkan `nodejs_compat` dan compatibility date yang mendukung populasi `process.env` dari runtime bindings.
 
-Publisher hanya menerima repository, branch, dan path dari environment server. Client hanya mengirim website ID dan draft. Path harus berada di bawah `content/dapur-kita/`.
+Publisher hanya menerima repository, branch, dan path dari environment server. Client hanya mengirim website ID dan draft. Branch diperiksa format ref-nya dan path dibatasi tepat ke `content/dapur-kita/content.v1.json`.
 
-Publisher membaca file existing untuk memperoleh SHA, kemudian memakai GitHub Contents API PUT dengan commit message eksplisit. Jika file belum ada, PUT dilakukan tanpa SHA. Tidak ada force push atau operasi destruktif.
+Publisher membaca file existing untuk memperoleh SHA terbaru, kemudian memakai GitHub Contents API PUT dengan commit message eksplisit. Jika GET Contents mengembalikan 404 untuk file yang tidak ada, publisher mencatat diagnostik aman lalu membuat file dengan PUT tanpa SHA. Jika file ada tetapi SHA tidak tersedia, atau hasil export kosong, operasi dihentikan agar konten tidak tertimpa. Tidak ada force push atau operasi destruktif.
+
+Kegagalan GitHub tidak dikembalikan dengan HTTP 200: konflik SHA menjadi HTTP 409 dan error upstream lainnya menjadi HTTP 502. Error konfigurasi yang hilang menjadi HTTP 503, sedangkan konfigurasi yang tidak valid menjadi HTTP 500.
 
 Jika GitHub menolak request, Cloudflare Worker logs mencatat status HTTP, pesan error GitHub yang disanitasi, endpoint tanpa credentials, `X-Accepted-GitHub-Permissions`, dan request ID saat tersedia. Response browser hanya menampilkan kategori aman karena route publish belum memiliki autentikasi. Header SSO hanya digunakan untuk menentukan kategori; URL otorisasi tidak dicatat atau diteruskan. Token, header Authorization, dan isi file repository tidak dicatat atau dikembalikan.
 

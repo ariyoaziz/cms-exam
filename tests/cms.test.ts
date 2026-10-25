@@ -88,6 +88,11 @@ describe("GitHub publishing contract", () => {
     draft.sections[0].content.image = "/uploads/media/site-dapur-kita/local.webp";
     expect(() => exportWebsiteContent(draft)).toThrow("URL produksi yang stabil");
   });
+  it("rejects an empty content export before any GitHub request", () => {
+    const draft = initialDraftForWebsite(defaultWebsiteId);
+    draft.pages = [];
+    expect(() => serializeWebsiteContent(draft)).toThrow();
+  });
   it("returns a generic configuration error and logs only missing variable names", async () => {
     for (const key of ["GITHUB_TOKEN", "GITHUB_OWNER", "GITHUB_REPO", "GITHUB_BRANCH", "GITHUB_CONTENT_PATH"] as const) vi.stubEnv(key, "");
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -111,6 +116,17 @@ describe("GitHub publishing contract", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(JSON.parse(errorLog.mock.calls[0][1] as string)).toEqual({ category: "invalid_configuration", missingVariables: [] });
   });
+  it("rejects a content path outside the server-approved export path before contacting GitHub", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "master"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/../private.json");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    const draft = initialDraftForWebsite(defaultWebsiteId);
+    const response = await publishContent(new Request("http://localhost/api/publish", { method: "POST", body: JSON.stringify({ websiteId: defaultWebsiteId, draft }), headers: { "Content-Type": "application/json" } }));
+    expect(response.status).toBe(500);
+    expect((await response.json()).error).toContain("tidak valid");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.parse(errorLog.mock.calls[0][1] as string).category).toBe("invalid_configuration");
+  });
   it("does not allow a different website to use the configured publishing endpoint", async () => {
     const draft = initialDraftForWebsite("site-studio-karsa");
     const response = await publishContent(new Request("http://localhost/api/publish", { method: "POST", body: JSON.stringify({ websiteId: "site-studio-karsa", draft }), headers: { "Content-Type": "application/json" } }));
@@ -130,7 +146,10 @@ describe("GitHub publishing contract", () => {
     vi.stubEnv("GITHUB_TOKEN", "private-test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "cms-exam"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: "Resource not accessible by personal access token", content: "PRIVATE_FILE_CONTENT" }), { status: 403, headers: { "X-Accepted-GitHub-Permissions": "contents=read", "X-GitHub-Request-Id": "req-abc123" } })));
-    const result = await publishToGitHub(initialDraftForWebsite(defaultWebsiteId));
+    const draft = initialDraftForWebsite(defaultWebsiteId);
+    const response = await publishContent(new Request("http://localhost/api/publish", { method: "POST", body: JSON.stringify({ websiteId: defaultWebsiteId, draft }), headers: { "Content-Type": "application/json" } }));
+    const result = await response.json();
+    expect(response.status).toBe(502);
     expect(result.ok).toBe(false);
     expect(result.message).toContain("(403)");
     expect(result.message).not.toContain("contents=read");
@@ -164,19 +183,60 @@ describe("GitHub publishing contract", () => {
   });
   it("creates a missing content file without a SHA", async () => {
     vi.stubEnv("GITHUB_TOKEN", "private-test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "master"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
+    const infoLog = vi.spyOn(console, "info").mockImplementation(() => {});
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ message: "Not Found" }), { status: 404 })).mockResolvedValueOnce(new Response(JSON.stringify({ commit: { sha: "created-sha" } }), { status: 201 }));
     vi.stubGlobal("fetch", fetchMock);
     const result = await publishToGitHub(initialDraftForWebsite(defaultWebsiteId));
     expect(result.ok).toBe(true); expect(result.commitSha).toBe("created-sha");
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).not.toHaveProperty("sha");
+    const putBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(putBody).not.toHaveProperty("sha");
+    const published = JSON.parse(Buffer.from(putBody.content, "base64").toString("utf8"));
+    expect(published.pages.length).toBeGreaterThan(0); expect(published.sections.length).toBeGreaterThan(0);
+    expect(JSON.parse(infoLog.mock.calls[0][1] as string)).toMatchObject({ method: "GET", status: 404, category: "content_file_missing_will_create" });
+  });
+  it("maps an invalid token to an upstream failure status instead of HTTP 200", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "invalid-test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "master"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: "Bad credentials" }), { status: 401, headers: { "X-GitHub-Request-Id": "auth-req-1" } })));
+    const draft = initialDraftForWebsite(defaultWebsiteId);
+    const response = await publishContent(new Request("http://localhost/api/publish", { method: "POST", body: JSON.stringify({ websiteId: defaultWebsiteId, draft }), headers: { "Content-Type": "application/json" } }));
+    expect(response.status).toBe(502);
+    expect((await response.json()).message).toContain("Autentikasi GitHub gagal");
+    expect(JSON.parse(errorLog.mock.calls[0][1] as string)).toMatchObject({ status: 401, category: "token_invalid_or_expired", requestId: "auth-req-1" });
+  });
+  it("returns HTTP 409 when the existing content changed before the PUT", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "master"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ sha: "fresh-sha" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({ message: "sha does not match" }), { status: 409 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const draft = initialDraftForWebsite(defaultWebsiteId);
+    const response = await publishContent(new Request("http://localhost/api/publish", { method: "POST", body: JSON.stringify({ websiteId: defaultWebsiteId, draft }), headers: { "Content-Type": "application/json" } }));
+    expect(response.status).toBe(409);
+    expect((await response.json()).message).toContain("berubah selama publish");
+    expect(JSON.parse(errorLog.mock.calls[0][1] as string)).toMatchObject({ operation: "write", method: "PUT", status: 409, category: "content_conflict" });
+  });
+  it("does not attempt a write when an existing file response has no SHA", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "master"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ type: "file" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await publishToGitHub(initialDraftForWebsite(defaultWebsiteId));
+    expect(result.ok).toBe(false);
+    expect(result.httpStatus).toBe(502);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(errorLog.mock.calls[0][1] as string).category).toBe("existing_file_missing_sha");
   });
   it("returns a generic 404 error and logs sanitized write diagnostics", async () => {
     vi.stubEnv("GITHUB_TOKEN", "private-test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "master"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ message: "Not Found" }), { status: 404 })).mockResolvedValueOnce(new Response(JSON.stringify({ message: "Not Found", content: "PRIVATE_FILE_CONTENT" }), { status: 404, headers: { "X-GitHub-Request-Id": "write-req-1" } }));
     vi.stubGlobal("fetch", fetchMock);
-    const result = await publishToGitHub(initialDraftForWebsite(defaultWebsiteId));
+    const draft = initialDraftForWebsite(defaultWebsiteId);
+    const response = await publishContent(new Request("http://localhost/api/publish", { method: "POST", body: JSON.stringify({ websiteId: defaultWebsiteId, draft }), headers: { "Content-Type": "application/json" } }));
+    const result = await response.json();
+    expect(response.status).toBe(502);
     expect(result.message).toContain("(404)"); expect(result.message).not.toContain("GITHUB_OWNER"); expect(result.message).not.toContain("ariyoaziz");
     const diagnostic = JSON.parse(errorLog.mock.calls[0][1] as string);
     expect(diagnostic).toMatchObject({ operation: "write", method: "PUT", status: 404, category: "repository_branch_or_path_not_found", githubMessage: "Not Found", requestId: "write-req-1" });

@@ -19,4 +19,4 @@ export type Website = { id: string; websiteId: string; name: string; slug: strin
 export type Draft = { website: Website; pages: WebsitePage[]; sections: WebsiteSection[]; products: Product[]; articles: Article[]; media: MediaAsset[]; updatedAt: string };
 export type DraftState = Draft;
 export type PublishedSnapshot = { id: string; version: number; draft: Draft; publishedAt: string; source: "dummy" | "github" };
-export type PublishResult = { ok: boolean; status: "simulated" | "github" | "failed"; message: string; publishedAt?: string; deploymentId?: string; commitSha?: string; repository?: string; path?: string; deploymentStatus?: "not-tracked" };
+export type PublishResult = { ok: boolean; status: "simulated" | "github" | "failed"; message: string; httpStatus?: number; publishedAt?: string; deploymentId?: string; commitSha?: string; repository?: string; path?: string; deploymentStatus?: "not-tracked" };
