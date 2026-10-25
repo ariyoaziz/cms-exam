@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "cms-ber",
+  "name": "cms-exam",
   "main": ".open-next/worker.js",
   "upload_source_maps": true,
   "compatibility_date": "2026-10-24",
@@ -15,7 +15,7 @@
   "services": [
     {
       "binding": "WORKER_SELF_REFERENCE",
-      "service": "cms-ber"
+      "service": "cms-exam"
     }
   ],
   "observability": {
