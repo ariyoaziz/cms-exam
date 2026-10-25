@@ -15,7 +15,11 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof GitHubConfigurationError) {
       console.error("cms-github-configuration-failure", JSON.stringify({ category: error.category, missingVariables: error.missingVariables }));
-      return NextResponse.json({ ok: false, error: "GitHub publishing belum dikonfigurasi. Hubungi administrator." }, { status: 503 });
+      const missing = error.category === "missing_configuration";
+      return NextResponse.json(
+        { ok: false, error: missing ? "Konfigurasi GitHub publishing belum lengkap. Hubungi administrator." : "Konfigurasi GitHub publishing tidak valid. Hubungi administrator." },
+        { status: missing ? 503 : 500 },
+      );
     }
     const message = error instanceof Error ? error.message : "Draft tidak dapat divalidasi.";
     return NextResponse.json({ ok: false, error: message }, { status: 422 });

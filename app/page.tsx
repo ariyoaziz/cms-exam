@@ -1,11 +1,13 @@
 "use client";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CircleHelp, ExternalLink, Eye, EyeOff, FileText, Globe2, GripVertical, Image as ImageIcon, Layers3, LayoutDashboard, LogOut, Menu as MenuIcon, MessageCircle, Monitor, PanelLeft, Plus, Rocket, Save, Settings2, ShoppingBag, Smartphone, Sparkles, Tablet, UserRound, Utensils, X } from "lucide-react";
 import { initialDraftForWebsite } from "../lib/cms/mock-data";
-import { defaultWebsiteId, websiteRegistry } from "../lib/cms/website-registry";
-import { readActiveWebsiteId, writeActiveWebsiteId } from "../lib/cms/website-storage";
+import { websiteRegistry } from "../lib/cms/website-registry";
+import { writeActiveWebsiteId } from "../lib/cms/website-storage";
 import { validateDraft } from "../lib/cms/validation";
 import { readCmsState, writeCmsState } from "../lib/cms/storage";
+import { restoreCmsBootstrap } from "../lib/cms/client-bootstrap";
+import type { CmsBootstrapState } from "../lib/cms/client-bootstrap";
 import { cloneDraft, dirtyFields } from "../lib/cms/draft-state";
 import { SchemaSectionEditor } from "../components/cms/section-editor/SchemaSectionEditor";
 import { MediaLibrary } from "../components/cms/media-library/MediaLibrary";
@@ -16,6 +18,9 @@ const sectionIcons: Record<SectionType, typeof Layers3> = { hero: Sparkles, menu
 const navItems = [[LayoutDashboard, "Dashboard"], [Layers3, "Pages & Sections"], [FileText, "Artikel"], [ShoppingBag, "Katalog / Produk"], [ImageIcon, "Media"], [Settings2, "Pengaturan Website"]] as const;
 const sectionTypes: { type: SectionType; label: string }[] = [{ type: "hero", label: "Hero Banner" }, { type: "menu", label: "Highlight Menu" }, { type: "about", label: "Tentang" }, { type: "gallery", label: "Galeri" }, { type: "testimonial", label: "Testimoni" }, { type: "articles", label: "Artikel Terbaru" }, { type: "cta", label: "CTA" }];
 const makeId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+const subscribeToHydration = () => () => {};
+const getClientHydrationSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
 
 function Button({ children, className = "", variant = "ghost", ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "ghost" | "dark" | "lime" | "outline" }) {
   return <button className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-[#BAF300] ${variant === "lime" ? "bg-[#BAF300] text-[#1A1A1A] hover:bg-[#c8ff32]" : variant === "dark" ? "bg-[#1A1A1A] text-white hover:bg-black" : variant === "outline" ? "border border-[#dcdad3] bg-white text-[#34342f] hover:bg-[#f6f5f0]" : "text-[#66665f] hover:bg-[#eeede8]"} ${className}`} {...props}>{children}</button>;
@@ -26,9 +31,14 @@ function Field({ label, value, onChange, maxLength, multiline = false, hint }: {
 }
 
 export default function Home() {
-  const [activeWebsiteId, setActiveWebsiteId] = useState(() => readActiveWebsiteId(defaultWebsiteId));
-  const activeFallback = initialDraftForWebsite(activeWebsiteId);
-  const [cmsState, setCmsState] = useState(() => readCmsState(activeFallback, activeWebsiteId));
+  const hydrated = useSyncExternalStore(subscribeToHydration, getClientHydrationSnapshot, getServerHydrationSnapshot);
+  if (!hydrated) return <main className="cms-shell" aria-busy="true"><p role="status" className="sr-only">Memuat CMS</p></main>;
+  return <CmsEditor initialBootstrap={restoreCmsBootstrap()} />;
+}
+
+function CmsEditor({ initialBootstrap }: { initialBootstrap: CmsBootstrapState }) {
+  const [activeWebsiteId, setActiveWebsiteId] = useState(initialBootstrap.activeWebsiteId);
+  const [cmsState, setCmsState] = useState(() => initialBootstrap.cmsState);
   const [draft, setDraft] = useState<DraftState>(cmsState.draft), [baseline, setBaseline] = useState<DraftState>(cmsState.baseline), [hasPublished, setHasPublished] = useState(Boolean(cmsState.published)), [pageId, setPageId] = useState("home"), [sectionId, setSectionId] = useState("hero"), [viewport, setViewport] = useState<Viewport>("desktop");
   const [mobileMenu, setMobileMenu] = useState(false), [editorOpen, setEditorOpen] = useState(true), [tab, setTab] = useState<"content" | "settings">("content"), [notice, setNotice] = useState(cmsState.storageError ?? ""), [saveState, setSaveState] = useState<"saved" | "saving" | "failed">("saved"), [publishOpen, setPublishOpen] = useState(false), [publishing, setPublishing] = useState(false), [discardOpen, setDiscardOpen] = useState(false), [mediaOpen, setMediaOpen] = useState(false), [mediaPicker, setMediaPicker] = useState(false), [mediaTargetKey, setMediaTargetKey] = useState<keyof Section["content"]>("image"), [addPageOpen, setAddPageOpen] = useState(false), [addSectionOpen, setAddSectionOpen] = useState(false), [newPageName, setNewPageName] = useState("");
   const publishRequest = useRef(0);

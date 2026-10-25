@@ -10,6 +10,7 @@ import { POST as uploadMedia } from "../app/api/media/route";
 import { DELETE as deleteMedia } from "../app/api/media/[id]/route";
 import { defaultWebsiteId, getWebsite, websiteRegistry } from "../lib/cms/website-registry";
 import { readActiveWebsiteId } from "../lib/cms/website-storage";
+import { createInitialCmsBootstrap, restoreCmsBootstrap } from "../lib/cms/client-bootstrap";
 import type { MediaAsset } from "../types/cms";
 import { exportWebsiteContent, serializeWebsiteContent } from "../lib/cms/publishing/content-export";
 import { POST as publishContent } from "../app/api/publish/route";
@@ -35,6 +36,27 @@ describe("website registry and namespaced persistence", () => {
   it("recovers safely from malformed and unsupported data", () => { const storage = installBrowser(); const fallback = initialDraftForWebsite(defaultWebsiteId); storage.setItem("ber-workshed-cms-state-v5-site-dapur-kita", "not-json"); expect(readCmsState(fallback, defaultWebsiteId).storageError).toContain("could not be read"); storage.setItem("ber-workshed-cms-state-v5-site-dapur-kita", JSON.stringify({ version: 99 })); expect(readCmsState(fallback, defaultWebsiteId).storageError).toContain("not recognized"); });
   it("falls back from an unknown active website id", () => { const storage = installBrowser(); storage.setItem("ber-workshed-active-website-v1", "unknown-site"); expect(readActiveWebsiteId(defaultWebsiteId)).toBe(defaultWebsiteId); });
   it("reports persistence failure without changing the in-memory draft", () => { const draft = initialDraftForWebsite(defaultWebsiteId); draft.pages[0].name = "Keep in memory"; vi.stubGlobal("window", { localStorage: { setItem: () => { throw new Error("quota"); } } }); expect(writeCmsState(makeState(defaultWebsiteId))).toBe(false); expect(draft.pages[0].name).toBe("Keep in memory"); });
+});
+
+describe("client hydration bootstrap", () => {
+  it("keeps the first render deterministic, then restores the saved website after hydration", () => {
+    const serverInitial = createInitialCmsBootstrap();
+    const storage = installBrowser();
+    const saved = makeState("site-studio-karsa");
+    saved.draft.sections[0].content.title = "Saved browser title";
+    expect(writeCmsState(saved)).toBe(true);
+    storage.setItem("ber-workshed-active-website-v1", "site-studio-karsa");
+
+    const firstRender = createInitialCmsBootstrap();
+    expect(firstRender).toEqual(serverInitial);
+    expect(firstRender.activeWebsiteId).toBe(defaultWebsiteId);
+    expect(firstRender.cmsState.draft.website.websiteId).toBe(defaultWebsiteId);
+    expect(firstRender.cmsState.draft.sections[0].content.title).not.toBe("Saved browser title");
+
+    const restored = restoreCmsBootstrap();
+    expect(restored.activeWebsiteId).toBe("site-studio-karsa");
+    expect(restored.cmsState.draft.sections[0].content.title).toBe("Saved browser title");
+  });
 });
 
 describe("draft and publish invariants", () => {
@@ -77,6 +99,17 @@ describe("GitHub publishing contract", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     const diagnostic = JSON.parse(errorLog.mock.calls[0][1] as string);
     expect(diagnostic).toEqual({ category: "missing_configuration", missingVariables: ["GITHUB_TOKEN", "GITHUB_OWNER", "GITHUB_REPO", "GITHUB_BRANCH", "GITHUB_CONTENT_PATH"] });
+  });
+  it("does not mislabel invalid GitHub settings as missing configuration", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "test-token"); vi.stubEnv("GITHUB_OWNER", "bad/owner"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "master"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    const draft = initialDraftForWebsite(defaultWebsiteId);
+    const response = await publishContent(new Request("http://localhost/api/publish", { method: "POST", body: JSON.stringify({ websiteId: defaultWebsiteId, draft }), headers: { "Content-Type": "application/json" } }));
+    expect(response.status).toBe(500);
+    expect((await response.json()).error).toContain("tidak valid");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.parse(errorLog.mock.calls[0][1] as string)).toEqual({ category: "invalid_configuration", missingVariables: [] });
   });
   it("does not allow a different website to use the configured publishing endpoint", async () => {
     const draft = initialDraftForWebsite("site-studio-karsa");
