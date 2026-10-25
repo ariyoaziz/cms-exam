@@ -13,7 +13,10 @@ export async function POST(request: Request) {
     exportWebsiteContent(draft);
     return NextResponse.json(await publishToGitHub(draft));
   } catch (error) {
-    if (error instanceof GitHubConfigurationError) return NextResponse.json({ ok: false, error: error.message }, { status: 503 });
+    if (error instanceof GitHubConfigurationError) {
+      console.error("cms-github-configuration-failure", JSON.stringify({ category: error.category, missingVariables: error.missingVariables }));
+      return NextResponse.json({ ok: false, error: "GitHub publishing belum dikonfigurasi. Hubungi administrator." }, { status: 503 });
+    }
     const message = error instanceof Error ? error.message : "Draft tidak dapat divalidasi.";
     return NextResponse.json({ ok: false, error: message }, { status: 422 });
   }

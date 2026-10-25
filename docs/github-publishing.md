@@ -16,11 +16,15 @@ Target website harus membaca JSON tersebut dari repository pada path yang sama d
 
 ## Server configuration
 
-Salin [.env.example](../.env.example) ke environment server dan isi dengan fine-grained GitHub token yang hanya memiliki Contents permission pada satu repository. Token tidak pernah dibaca client-side atau dikirim kembali melalui response.
+Salin [.env.example](../.env.example) ke environment server dan isi dengan fine-grained GitHub token yang hanya memiliki akses ke satu repository. Berikan repository permission `Contents: read` untuk membaca SHA file existing dan `Contents: write` untuk membuat atau memperbarui file. Jika repository milik organisasi, token mungkin perlu persetujuan admin atau otorisasi SSO. Token tidak pernah dibaca client-side atau dikirim kembali melalui response.
+
+Untuk Cloudflare Workers, set kelima variabel sebagai runtime variables/secrets pada Worker (`GITHUB_TOKEN` sebagai Secret). Jangan hanya mengaturnya sebagai Workers Builds build variables. Worker memakai `process.env`; konfigurasi Wrangler mengaktifkan `nodejs_compat` dan compatibility date yang mendukung populasi `process.env` dari runtime bindings.
 
 Publisher hanya menerima repository, branch, dan path dari environment server. Client hanya mengirim website ID dan draft. Path harus berada di bawah `content/dapur-kita/`.
 
 Publisher membaca file existing untuk memperoleh SHA, kemudian memakai GitHub Contents API PUT dengan commit message eksplisit. Jika file belum ada, PUT dilakukan tanpa SHA. Tidak ada force push atau operasi destruktif.
+
+Jika GitHub menolak request, Cloudflare Worker logs mencatat status HTTP, pesan error GitHub yang disanitasi, endpoint tanpa credentials, `X-Accepted-GitHub-Permissions`, dan request ID saat tersedia. Response browser hanya menampilkan kategori aman karena route publish belum memiliki autentikasi. Header SSO hanya digunakan untuk menentukan kategori; URL otorisasi tidak dicatat atau diteruskan. Token, header Authorization, dan isi file repository tidak dicatat atau dikembalikan.
 
 ## Deployment status
 

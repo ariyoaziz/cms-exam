@@ -26,7 +26,7 @@ class MemoryStorage implements Storage {
 }
 const installBrowser = () => { const localStorage = new MemoryStorage(); vi.stubGlobal("window", { localStorage }); return localStorage; };
 const makeState = (websiteId: string): StoredCmsState => { const draft = initialDraftForWebsite(websiteId); return { version: 4, draft, baseline: cloneDraft(draft), published: null, savedAt: "" }; };
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("website registry and namespaced persistence", () => {
   it("contains distinct valid demo websites", () => { expect(websiteRegistry).toHaveLength(3); expect(new Set(websiteRegistry.map((site) => site.websiteId)).size).toBe(3); expect(getWebsite("unknown-site")).toBeUndefined(); });
@@ -66,11 +66,17 @@ describe("GitHub publishing contract", () => {
     draft.sections[0].content.image = "/uploads/media/site-dapur-kita/local.webp";
     expect(() => exportWebsiteContent(draft)).toThrow("URL produksi yang stabil");
   });
-  it("returns a configuration error without contacting GitHub", async () => {
+  it("returns a generic configuration error and logs only missing variable names", async () => {
+    for (const key of ["GITHUB_TOKEN", "GITHUB_OWNER", "GITHUB_REPO", "GITHUB_BRANCH", "GITHUB_CONTENT_PATH"] as const) vi.stubEnv(key, "");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     const draft = initialDraftForWebsite(defaultWebsiteId);
     const response = await publishContent(new Request("http://localhost/api/publish", { method: "POST", body: JSON.stringify({ websiteId: defaultWebsiteId, draft }), headers: { "Content-Type": "application/json" } }));
     expect(response.status).toBe(503);
-    expect((await response.json()).error).toContain("GITHUB_TOKEN");
+    expect((await response.json()).error).not.toContain("GITHUB_TOKEN");
+    expect(fetchMock).not.toHaveBeenCalled();
+    const diagnostic = JSON.parse(errorLog.mock.calls[0][1] as string);
+    expect(diagnostic).toEqual({ category: "missing_configuration", missingVariables: ["GITHUB_TOKEN", "GITHUB_OWNER", "GITHUB_REPO", "GITHUB_BRANCH", "GITHUB_CONTENT_PATH"] });
   });
   it("does not allow a different website to use the configured publishing endpoint", async () => {
     const draft = initialDraftForWebsite("site-studio-karsa");
@@ -83,6 +89,64 @@ describe("GitHub publishing contract", () => {
     vi.stubGlobal("fetch", fetchMock);
     const result = await publishToGitHub(initialDraftForWebsite(defaultWebsiteId));
     expect(result.ok).toBe(true); expect(result.commitSha).toBe("new-sha"); expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.github.com/repos/owner/repo/contents/content/dapur-kita/content.v1.json?ref=main");
+    expect(fetchMock.mock.calls[0][1].method).toBe("GET"); expect(fetchMock.mock.calls[1][1].method).toBe("PUT");
     const put = JSON.parse(fetchMock.mock.calls[1][1].body as string); expect(put.sha).toBe("old-sha"); expect(put.branch).toBe("main");
+  });
+  it("logs safe 403 diagnostics, including the required permission and request id", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "private-test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "cms-exam"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: "Resource not accessible by personal access token", content: "PRIVATE_FILE_CONTENT" }), { status: 403, headers: { "X-Accepted-GitHub-Permissions": "contents=read", "X-GitHub-Request-Id": "req-abc123" } })));
+    const result = await publishToGitHub(initialDraftForWebsite(defaultWebsiteId));
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("(403)");
+    expect(result.message).not.toContain("contents=read");
+    expect(result.message).not.toContain("Resource not accessible");
+    expect(result.message).not.toContain("private-test-token");
+    const serializedLog = errorLog.mock.calls.map((call) => call.join(" ")).join(" ");
+    const diagnostic = JSON.parse(errorLog.mock.calls[0][1] as string);
+    expect(diagnostic).toMatchObject({ operation: "read", method: "GET", status: 403, category: "access_denied_permission_or_policy", githubMessage: "Resource not accessible by personal access token", acceptedPermissions: "contents=read", requestId: "req-abc123" });
+    expect(diagnostic.endpoint).toBe("/repos/ariyoaziz/cms-exam/contents/content/dapur-kita/content.v1.json?ref=cms-exam");
+    expect(serializedLog).not.toContain("private-test-token"); expect(serializedLog).not.toContain("Authorization"); expect(serializedLog).not.toContain("PRIVATE_FILE_CONTENT");
+  });
+  it("categorizes SSO restrictions without logging or returning the authorization URL", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "private-test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "main"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: "Resource protected by SAML SSO" }), { status: 403, headers: { "X-GitHub-SSO": "required; url=https://github.com/orgs/example/sso" } })));
+    const result = await publishToGitHub(initialDraftForWebsite(defaultWebsiteId));
+    expect(result.message).toContain("SSO"); expect(result.message).toContain("403");
+    expect(result.message).not.toContain("github.com/orgs/example/sso");
+    expect(JSON.parse(errorLog.mock.calls[0][1] as string).category).toBe("organization_sso_or_approval");
+    expect(errorLog.mock.calls.flat().join(" ")).not.toContain("github.com/orgs/example/sso");
+  });
+  it("distinguishes a missing configured branch and does not attempt a write", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "private-test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "cms-exam"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: "No commit found for the ref cms-exam" }), { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await publishToGitHub(initialDraftForWebsite(defaultWebsiteId));
+    expect(result.message.toLowerCase()).toContain("branch"); expect(result.message).not.toContain("cms-exam");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(errorLog.mock.calls[0][1] as string).category).toBe("branch_not_found");
+  });
+  it("creates a missing content file without a SHA", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "private-test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "master"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ message: "Not Found" }), { status: 404 })).mockResolvedValueOnce(new Response(JSON.stringify({ commit: { sha: "created-sha" } }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await publishToGitHub(initialDraftForWebsite(defaultWebsiteId));
+    expect(result.ok).toBe(true); expect(result.commitSha).toBe("created-sha");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).not.toHaveProperty("sha");
+  });
+  it("returns a generic 404 error and logs sanitized write diagnostics", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "private-test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "master"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ message: "Not Found" }), { status: 404 })).mockResolvedValueOnce(new Response(JSON.stringify({ message: "Not Found", content: "PRIVATE_FILE_CONTENT" }), { status: 404, headers: { "X-GitHub-Request-Id": "write-req-1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await publishToGitHub(initialDraftForWebsite(defaultWebsiteId));
+    expect(result.message).toContain("(404)"); expect(result.message).not.toContain("GITHUB_OWNER"); expect(result.message).not.toContain("ariyoaziz");
+    const diagnostic = JSON.parse(errorLog.mock.calls[0][1] as string);
+    expect(diagnostic).toMatchObject({ operation: "write", method: "PUT", status: 404, category: "repository_branch_or_path_not_found", githubMessage: "Not Found", requestId: "write-req-1" });
+    expect(errorLog.mock.calls.flat().join(" ")).not.toContain("private-test-token"); expect(errorLog.mock.calls.flat().join(" ")).not.toContain("PRIVATE_FILE_CONTENT");
   });
 });
