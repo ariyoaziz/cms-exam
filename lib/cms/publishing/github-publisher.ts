@@ -3,6 +3,8 @@ import { githubContentPath, serializeWebsiteContent } from "./content-export";
 
 type GitHubConfig = { token: string; owner: string; repo: string; branch: string; contentPath: string };
 const githubApi = "https://api.github.com";
+const githubOwner = "ariyoaziz";
+const githubRepo = "cms-exam";
 
 export class GitHubConfigurationError extends Error {
   constructor(
@@ -31,7 +33,7 @@ function readConfig(): GitHubConfig {
     && branchParts.every((part) => part.length > 0 && part !== "." && part !== ".." && !part.startsWith(".") && !part.endsWith(".lock"))
     && !values.branch!.includes("@{")
     && !values.branch!.endsWith(".");
-  if (!/^[A-Za-z0-9_.-]+$/.test(values.owner!) || !/^[A-Za-z0-9_.-]+$/.test(values.repo!) || !branchIsValid || values.contentPath !== githubContentPath) {
+  if (values.owner !== githubOwner || values.repo !== githubRepo || !branchIsValid || values.contentPath !== githubContentPath) {
     throw new GitHubConfigurationError("Konfigurasi repository GitHub tidak diizinkan.", "invalid_configuration");
   }
   return values as GitHubConfig;

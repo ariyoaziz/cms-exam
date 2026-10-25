@@ -133,12 +133,12 @@ describe("GitHub publishing contract", () => {
     expect(response.status).toBe(403);
   });
   it("updates an existing configured file and returns the GitHub commit SHA", async () => {
-    vi.stubEnv("GITHUB_TOKEN", "test-token"); vi.stubEnv("GITHUB_OWNER", "owner"); vi.stubEnv("GITHUB_REPO", "repo"); vi.stubEnv("GITHUB_BRANCH", "main"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
+    vi.stubEnv("GITHUB_TOKEN", "test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "main"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ sha: "old-sha" }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({ commit: { sha: "new-sha" } }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const result = await publishToGitHub(initialDraftForWebsite(defaultWebsiteId));
     expect(result.ok).toBe(true); expect(result.commitSha).toBe("new-sha"); expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0][0]).toBe("https://api.github.com/repos/owner/repo/contents/content/dapur-kita/content.v1.json?ref=main");
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.github.com/repos/ariyoaziz/cms-exam/contents/content/dapur-kita/content.v1.json?ref=main");
     expect(fetchMock.mock.calls[0][1].method).toBe("GET"); expect(fetchMock.mock.calls[1][1].method).toBe("PUT");
     const put = JSON.parse(fetchMock.mock.calls[1][1].body as string); expect(put.sha).toBe("old-sha"); expect(put.branch).toBe("main");
   });
@@ -189,11 +189,23 @@ describe("GitHub publishing contract", () => {
     const result = await publishToGitHub(initialDraftForWebsite(defaultWebsiteId));
     expect(result.ok).toBe(true); expect(result.commitSha).toBe("created-sha");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.github.com/repos/ariyoaziz/cms-exam/contents/content/dapur-kita/content.v1.json?ref=master");
+    expect(fetchMock.mock.calls[1][0]).toBe("https://api.github.com/repos/ariyoaziz/cms-exam/contents/content/dapur-kita/content.v1.json");
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
     expect(putBody).not.toHaveProperty("sha");
     const published = JSON.parse(Buffer.from(putBody.content, "base64").toString("utf8"));
     expect(published.pages.length).toBeGreaterThan(0); expect(published.sections.length).toBeGreaterThan(0);
     expect(JSON.parse(infoLog.mock.calls[0][1] as string)).toMatchObject({ method: "GET", status: 404, category: "content_file_missing_will_create" });
+  });
+  it("rejects a runtime repository value confused with the branch", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "master"); vi.stubEnv("GITHUB_BRANCH", "master"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    const response = await publishContent(new Request("http://localhost/api/publish", { method: "POST", body: JSON.stringify({ websiteId: defaultWebsiteId, draft: initialDraftForWebsite(defaultWebsiteId) }), headers: { "Content-Type": "application/json" } }));
+    expect(response.status).toBe(500);
+    expect((await response.json()).error).toContain("tidak valid");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.parse(errorLog.mock.calls[0][1] as string)).toMatchObject({ category: "invalid_configuration", missingVariables: [] });
   });
   it("maps an invalid token to an upstream failure status instead of HTTP 200", async () => {
     vi.stubEnv("GITHUB_TOKEN", "invalid-test-token"); vi.stubEnv("GITHUB_OWNER", "ariyoaziz"); vi.stubEnv("GITHUB_REPO", "cms-exam"); vi.stubEnv("GITHUB_BRANCH", "master"); vi.stubEnv("GITHUB_CONTENT_PATH", "content/dapur-kita/content.v1.json");
